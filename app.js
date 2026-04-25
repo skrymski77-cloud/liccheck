@@ -29,7 +29,7 @@ function showToast(message, type) {
     }, 2500);
 }
 
-// Рендер карточек с новой анимацией
+// Рендер карточек
 function renderCards(filteredLicenses) {
     const grid = document.getElementById('cardsGrid');
     if (filteredLicenses.length === 0) {
@@ -56,25 +56,50 @@ function renderCards(filteredLicenses) {
     document.getElementById('statsText').innerHTML = `Показано ${filteredLicenses.length} ${getNumeral(filteredLicenses.length, 'лицензия', 'лицензии', 'лицензий')}`;
 }
 
-// Рендер списка карточек в админ-панели
+// Рендер списка карточек в админ-панели (с возможностью удаления каждой)
 function renderAdminCardsList() {
     const container = document.getElementById('cardsList');
     if (!container) return;
-    container.innerHTML = licenses.map(lic => `
-        <div class="card-item">
-            <div class="card-item-info">
-                <div class="card-item-name">${lic.color === 'green' ? '🟢' : lic.color === 'yellow' ? '🟡' : '🔴'} ${escapeHtml(lic.name)}</div>
-                <div class="card-item-color">${lic.isBase ? '📌 Базовая' : '✨ Добавленная'}</div>
+    
+    if (licenses.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding:20px; color:#888;">Нет лицензий</div>';
+        return;
+    }
+    
+    container.innerHTML = licenses.map(lic => {
+        // Определяем тип карточки для отображения
+        let typeLabel = '';
+        let typeIcon = '';
+        if (lic.isBase) {
+            typeIcon = '📌';
+            typeLabel = 'Базовая (нельзя удалить)';
+        } else if (lic.isGenerated) {
+            typeIcon = '🎲';
+            typeLabel = 'Сгенерированная';
+        } else if (lic.isUserAdded) {
+            typeIcon = '✏️';
+            typeLabel = 'Добавленная вручную';
+        } else {
+            typeIcon = '📄';
+            typeLabel = 'Пользовательская';
+        }
+        
+        return `
+            <div class="card-item" data-id="${lic.id}">
+                <div class="card-item-info">
+                    <div class="card-item-name">${lic.color === 'green' ? '🟢' : lic.color === 'yellow' ? '🟡' : '🔴'} ${escapeHtml(lic.name)}</div>
+                    <div class="card-item-color">${typeIcon} ${typeLabel}</div>
+                </div>
+                <div class="card-item-actions">
+                    <button class="card-item-btn edit" onclick="editLicense(${lic.id})">✏️ Редактировать</button>
+                    ${!lic.isBase ? `<button class="card-item-btn delete" onclick="deleteLicense(${lic.id})">🗑️ Удалить</button>` : '<button class="card-item-btn delete" disabled style="opacity:0.5; cursor:not-allowed;" title="Базовые лицензии нельзя удалить">🔒 Защищена</button>'}
+                </div>
             </div>
-            <div class="card-item-actions">
-                <button class="card-item-btn edit" onclick="editLicense(${lic.id})">✏️</button>
-                ${!lic.isBase ? `<button class="card-item-btn delete" onclick="deleteLicense(${lic.id})">🗑️</button>` : ''}
-            </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
-// Переключение карточки с сохранением состояния
+// Переключение карточки
 function toggleCard(cardElement, licenseId) {
     const license = licenses.find(l => l.id === licenseId);
     if (license) {
@@ -135,7 +160,7 @@ function copyLicenseName(name, btn) {
     }).catch(() => showToast('Ошибка копирования', ''));
 }
 
-// Админ-панель с анимацией
+// Админ-панель
 function toggleAdminPanel() {
     const sidebar = document.getElementById('adminSidebar');
     sidebar.classList.toggle('open');
@@ -180,21 +205,23 @@ function generateRandomCardsFromInput() {
     generateRandomCards(count);
 }
 
-// Удаление всех пользовательских карточек
+// Удаление только сгенерированных карточек
 function clearAllUserCards() {
-    const userCount = licenses.filter(l => !l.isBase).length;
-    if (userCount === 0) {
-        showToast('Нет пользовательских лицензий для удаления', '');
+    const generatedCount = licenses.filter(l => l.isGenerated === true).length;
+    
+    if (generatedCount === 0) {
+        showToast('Нет сгенерированных лицензий для удаления', '');
         return;
     }
-    if (confirm(`Удалить все ${userCount} добавленные лицензии? Базовые останутся.`)) {
-        licenses = licenses.filter(l => l.isBase === true);
+    
+    if (confirm(`Удалить все ${generatedCount} сгенерированные лицензии?\n\nБазовые и добавленные вручную останутся.`)) {
+        licenses = licenses.filter(l => l.isGenerated !== true);
         saveLicenses(licenses);
         renderCards(getFilteredLicenses());
         if (document.getElementById('adminSidebar').classList.contains('open')) {
             renderAdminCardsList();
         }
-        showToast(`🗑️ Удалено ${userCount} лицензий`, 'success');
+        showToast(`🗑️ Удалено ${generatedCount} сгенерированных лицензий`, 'success');
     }
 }
 
@@ -212,14 +239,22 @@ function editLicense(id) {
     document.getElementById('licenseModal').style.display = 'flex';
 }
 
-// Удаление лицензии
+// Удаление отдельной лицензии (для базовых - запрещено)
 function deleteLicense(id) {
     const license = licenses.find(l => l.id === id);
+    if (!license) return;
+    
     if (license.isBase) {
         showToast('❌ Нельзя удалить базовую лицензию', '');
         return;
     }
-    if (confirm(`Удалить лицензию "${license.name}"?`)) {
+    
+    let typeText = '';
+    if (license.isGenerated) typeText = 'сгенерированную';
+    else if (license.isUserAdded) typeText = 'добавленную вручную';
+    else typeText = 'пользовательскую';
+    
+    if (confirm(`Удалить ${typeText} лицензию "${license.name}"?`)) {
         licenses = licenses.filter(l => l.id !== id);
         saveLicenses(licenses);
         renderCards(getFilteredLicenses());
@@ -242,31 +277,33 @@ function addOrUpdateLicenseFromForm(event) {
     const mustDo = document.getElementById('mustDoRows').value.split(/\r?\n/).filter(l => l.trim());
     
     if (editId) {
+        // Редактирование существующей
         const index = licenses.findIndex(l => l.id == editId);
         if (index !== -1) {
+            // Сохраняем оригинальные флаги (isBase, isGenerated, isUserAdded)
+            const originalFlags = {
+                isBase: licenses[index].isBase || false,
+                isGenerated: licenses[index].isGenerated || false,
+                isUserAdded: licenses[index].isUserAdded || false
+            };
             licenses[index] = {
                 ...licenses[index],
                 name, color,
                 canDo: canDo.length ? canDo : ['Нет данных'],
                 cannotDo: cannotDo.length ? cannotDo : ['Нет данных'],
-                mustDo: mustDo.length ? mustDo : ['Нет данных']
+                mustDo: mustDo.length ? mustDo : ['Нет данных'],
+                ...originalFlags
             };
             showToast(`✏️ Лицензия "${name}" обновлена`, 'success');
         }
     } else {
+        // Проверка на дубликат
         if (licenses.some(l => l.name.toLowerCase() === name.toLowerCase())) {
             showToast('❌ Такая лицензия уже есть', '');
             return;
         }
-        const newLicense = {
-            id: Date.now(),
-            name, color,
-            canDo: canDo.length ? canDo : ['Нет данных'],
-            cannotDo: cannotDo.length ? cannotDo : ['Нет данных'],
-            mustDo: mustDo.length ? mustDo : ['Нет данных'],
-            isBase: false,
-            expanded: false
-        };
+        // Создание новой вручную (isUserAdded = true)
+        const newLicense = createManualLicense(name, color, canDo, cannotDo, mustDo);
         licenses.push(newLicense);
         showToast(`✅ Лицензия "${name}" добавлена`, 'success');
     }
@@ -293,7 +330,6 @@ function closeModal() {
 function init() {
     licenses = loadLicenses();
     renderCards(licenses);
-    
     document.getElementById('addLicenseForm').addEventListener('submit', addOrUpdateLicenseFromForm);
     
     window.onclick = function(e) {
@@ -301,13 +337,13 @@ function init() {
         if (e.target === modal) closeModal();
     };
     
-    // Закрытие админ-панели при клике вне (опционально)
+    // Закрытие админ-панели при клике вне
     document.addEventListener('click', function(e) {
         const sidebar = document.getElementById('adminSidebar');
         const fab = document.getElementById('fabBtn');
-        if (sidebar.classList.contains('open') && 
+        if (sidebar && sidebar.classList.contains('open') && 
             !sidebar.contains(e.target) && 
-            !fab.contains(e.target)) {
+            fab && !fab.contains(e.target)) {
             sidebar.classList.remove('open');
         }
     });
